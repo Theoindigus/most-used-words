@@ -12,97 +12,120 @@
 # HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import docx
-import sys
+from sys import path as abs_path
+from sys import platform
+from sys import exit
 import re
 import os.path
-from progress.bar import IncrementalBar
+from progress.bar import IncrementalBar as IncBar
+from docx import Document as Doc
 
 # Подготовка программы
-file_not_exists = True
-file_name = ''
-file_path = ''
-while(file_not_exists):
+f_not_exists = True # file no exists
+f_name = '' # file name
+f_path = '' # file path
+dir_sep = '' # directory separator
+if platform == "linux" or platform == "linux2":
+	dir_sep = '/'
+elif platform == "win32":
+	dir_sep = '\\'
+elif platform == "darwin":
+	dir_sep = ':'
+else:
+	print('Unknown platform')
+	exit(-1)
+
+# Ввод имени файла и проверка его наличия
+while f_not_exists:
 	print('Enter the file name. The file should be in the same directory with the script')
-	file_name = input()
-	file_path = sys.path[0] + '\\' + file_name + '.docx'
-	if not os.path.exists(file_path):
-		print("There is no such file")
+	f_name = input()
+	f_path = abs_path[0] + dir_sep + f_name + '.docx'
+	if not os.path.exists(f_path):
+		print("There is no such file: " + f_path)
 	else:
-		file_not_exists = False
+		f_not_exists = False
 
 # Создание паттерна по которому из текста будут выделяться слова вместе со знаками пунктуации
-base_pattern = r'\s*([-,.!?:;\'"/\\0-9A-Za-zА-Яа-яЁё]+)\s*'
+# text_pattern = r'\s*([-,.!?:;\'"/\\0-9A-Za-zА-Яа-яЁё]+)\s*'
 # Создание паттерна по которому из текста будут выделяться слова без знаков пунктуации
-only_liters_pattern = r'\s*([-\'"A-Za-zА-Яа-яЁё]+)\s*'
+# letters_pattern = r'\s*([-\'"A-Za-zА-Яа-яЁё]+)\s*'
+
+patterns = (r'\s*([-,.!?:;\'"/\\0-9A-Za-z]+)\s*',
+			r'\s*([-,.!?:;\'"/\\0-9А-Яа-яЁё]+)\s*',
+			r'\s*([-\'"A-Za-z]+)\s*',
+			r'\s*([-\'"А-Яа-яЁё]+)\s*')
 
 # Для облегчения обработки файла стоит исключить из него базовый набор
 # общеупотребимых слов, а также отдельные буквы алфавита 
-exclude_words_set = set()
-if not os.path.exists(sys.path[0] + '\\exclude_words.docx'):
+excluded_words = set()
+if not os.path.exists(abs_path[0] + dir_sep + 'exclude_words.docx'):
 	print('The file with the list of excluded words is missing in the script directory')
 else:
-	for p in docx.Document(sys.path[0] + '\\exclude_words.docx').paragraphs:
-		exclude_words_set.add(p.text)
+	for p in Doc(abs_path[0] + dir_sep +'exclude_words.docx').paragraphs:
+		excluded_words.add(p.text)
 
 
 # Получение исходного документа
 # Извлечение из него параграфов текста
 # Создание прогресс-бара
-origin_doc = docx.Document(file_path)
+origin_doc = Doc(f_path)
 paragraphs = origin_doc.paragraphs
-bar = IncrementalBar('Paragraphs processing:         ', max = len(paragraphs))
+bar = IncBar('Paragraphs processing:         ', max = len(paragraphs))
 
 # Создание словаря для хранения всех слов без повторов в качестве ключа
 # и количества их повторов в качестве значения
 # Создание документа, в который будет записан отделённый от всего документа
 # текст без форматирования, то есть чистый текст
-clear_set = dict()
-clear_doc = docx.Document()
+all_words_set = dict()
+plain_text_doc = Doc()
 
 for p in paragraphs:
-	match = re.findall(base_pattern, p.text)
+	match = re.findall(patterns[0], p.text)
 	if match:
-		clear_text = '\t'
+		plain_text = '\t'
 		for m in match:
 			if m:
-				clear_text += m + ' '
-				tmp = re.match(only_liters_pattern, m)
+				plain_text += m + ' '
+				tmp = re.match(patterns[2], m)
 				if tmp:
 					tmp = tmp.group(0)
-					if tmp not in exclude_words_set:
-						if tmp not in clear_set:
-							clear_set[tmp.lower()] = 1
+					if tmp not in excluded_words:
+						if tmp not in all_words_set:
+							all_words_set[tmp.lower()] = 1
 						else:
-							clear_set[tmp.lower()] = clear_set[tmp.lower()] + 1
-		clear_doc.add_paragraph(clear_text)
+							all_words_set[tmp.lower()] = all_words_set[tmp.lower()] + 1
+		plain_text_doc.add_paragraph(plain_text)
 	bar.next()
 bar.finish()
 
+# Ввод максимального количества наиболее используемых слов, которые надо найти
+# Поиск в полученном раннее словаре слов, которые чаще всего встречались в тексте
+# Сортировка полученного списка слов по алфавиту
 max_search_words = int(input('Enter the maximum number of most used words to be found:\n'))
-if max_search_words > len(clear_set):
-	max_search_words = len(clear_set)
-bar = IncrementalBar('Search for the most used words:', max = max_search_words)
+if max_search_words > len(all_words_set):
+	max_search_words = len(all_words_set)
+bar = IncBar('Search for the most used words:', max = max_search_words)
 most_used_words = list()
 for i in range(0, max_search_words):
 	max_used_count = 0
 	max_used_word = ''
-	for e in clear_set:
-		if clear_set[e] > max_used_count:
+	for e in all_words_set:
+		if all_words_set[e] > max_used_count:
 			max_used_word = e
-			max_used_count = clear_set[e]
+			max_used_count = all_words_set[e]
 	most_used_words.append(max_used_word)
-	del clear_set[max_used_word]
+	del all_words_set[max_used_word]
 	bar.next()
 most_used_words = sorted(most_used_words)
 bar.finish()
 
-bar = IncrementalBar('Files saving:                  ', max = len(most_used_words) + 1)
-clear_doc.save(sys.path[0] + '\\' + file_name + '_clear_text.docx')
+# Сохранение в файлы чистого текста и списка слов
+bar = IncBar('Files saving:                  ', max = len(most_used_words))
+plain_text_doc.save(abs_path[0] + dir_sep + f_name + '_plain_text.docx')
 bar.next()
-most_used_words_doc = docx.Document()
+most_used_words_doc = Doc()
 for w in most_used_words:
 	most_used_words_doc.add_paragraph(w)
 	bar.next()
-most_used_words_doc.save(sys.path[0] + '\\' + file_name + '_most_used_words.docx')
+most_used_words_doc.save(abs_path[0] + dir_sep + f_name + '_most_used_words.docx')
 bar.finish()
